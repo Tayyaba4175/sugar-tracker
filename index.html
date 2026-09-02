@@ -71,6 +71,17 @@
   h1 { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 0 0 4px; }
   .sub { color: var(--muted); font-size: 13px; }
 
+  .pill {
+    display: inline-block; margin-top: 10px;
+    font-size: 12px; font-weight: 500; padding: 3px 10px 3px 8px;
+    border-radius: 999px; border: 1px solid var(--border); color: var(--text-2);
+    background: var(--surface);
+  }
+  .pill::before {
+    content: "\25CF"; margin-right: 6px; color: var(--muted);
+  }
+  .pill.on::before { color: var(--good); }
+
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -180,6 +191,7 @@
   <header>
     <h1>Sugar Log</h1>
     <div class="sub">Blood glucose readings, with the trend over time.</div>
+    <div class="pill off" id="mode">This device only</div>
   </header>
 
   <section class="card">
@@ -264,7 +276,7 @@
   </section>
 
   <p class="disclaimer">
-    Records are stored only in this browser, on this device &mdash; nothing is uploaded.
+    <span id="where">Records are stored only in this browser, on this device &mdash; nothing is uploaded.</span>
     This is a personal log, not medical advice; discuss any pattern with a doctor.
   </p>
 
@@ -288,7 +300,7 @@
   var MIN_POINTS = 4;      // fewest readings before calling a trend
   var MIN_SPAN_DAYS = 3;   // shortest span a per-week rate may be inferred from
 
-  var readings = load();
+  var readings = loadLocal();
   var rangeDays = 30;
   var typeFilter = "all";
 
@@ -296,20 +308,125 @@
 
   /* ---------- storage ---------- */
 
-  function load() {
+  // Two backends. localStorage is always present: it makes the first paint
+  // instant and keeps the log working on a plain static host. When the page
+  // runs as a published artifact it also gets a per-account document store,
+  // which then becomes the source of truth and syncs the log across devices.
+
+  var mode = "local";     // "local" | "synced"
+  var note = "";          // extra detail for the status pill
+  var coll = null;        // the readings collection, once synced
+
+  function valid(r) {
+    return r && typeof r.t === "number" && typeof r.v === "number" && TYPES[r.type];
+  }
+
+  function loadLocal() {
     try {
       var raw = localStorage.getItem(KEY);
       if (!raw) return [];
       var list = JSON.parse(raw);
-      if (!Array.isArray(list)) return [];
-      return list.filter(function (r) {
-        return r && typeof r.t === "number" && typeof r.v === "number" && TYPES[r.type];
-      });
+      return Array.isArray(list) ? list.filter(valid) : [];
     } catch (e) { return []; }
   }
 
-  function save() {
+  function saveLocal() {
     try { localStorage.setItem(KEY, JSON.stringify(readings)); } catch (e) {}
+  }
+
+  function monthKey(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+
+  // One document per calendar month, not one per reading: the store caps an
+  // artifact at 5,000 documents, which a daily log would reach in a few years.
+  // A month of readings is a few KB against a 256 KiB per-document limit.
+  function byMonth(list) {
+    var m = {};
+    list.forEach(function (r) {
+      var k = monthKey(r.t);
+      (m[k] = m[k] || []).push(r);
+    });
+    return m;
+  }
+
+  function monthKeys(list) { return Object.keys(byMonth(list)); }
+
+  // `touched` names the months whose contents changed; a month that no longer
+  // has readings has its document deleted rather than left as an empty husk.
+  function persist(touched) {
+    saveLocal();
+    if (mode !== "synced" || !coll) return;
+    var m = byMonth(readings);
+    (touched || Object.keys(m)).forEach(function (k) {
+      var items = m[k];
+      var p = items && items.length
+        ? coll.doc(k).set({ month: k, items: items })
+        : coll.doc(k).delete();
+      p.catch(syncLost);
+    });
+  }
+
+  function syncLost(e) {
+    mode = "local";
+    note = (e && e.code === "quota_exceeded")
+      ? "sync storage is full \u2014 saved on this device"
+      : "sync unavailable \u2014 saved on this device";
+    renderMode();
+  }
+
+  function initSync() {
+    if (!window.claude || typeof window.claude.use !== "function") return;
+    // Resolves later than this script, and null when the page is not being
+    // served as an artifact - so the page must already work without it.
+    window.claude.use("db").then(function (db) {
+      if (!db) return;
+      coll = db.collection("readings");
+      return coll.get().then(function (snap) {
+        // First sync from a device that already holds a local log: seed it.
+        if (snap.empty && readings.length) {
+          var m = byMonth(readings);
+          return Promise.all(Object.keys(m).map(function (k) {
+            return coll.doc(k).set({ month: k, items: m[k] });
+          }));
+        }
+      }).then(function () {
+        mode = "synced";
+        note = "";
+        renderMode();
+        coll.onSnapshot(function (snap) {
+          var list = [];
+          snap.docs.forEach(function (d) {
+            var body = d.data() || {};
+            if (Array.isArray(body.items)) list = list.concat(body.items);
+          });
+          readings = list.filter(valid);
+          saveLocal();
+          render();
+        }, syncLost);
+      });
+    }).catch(syncLost);
+  }
+
+  function renderMode() {
+    var el = $("mode");
+    if (!el) return;
+    var synced = mode === "synced";
+    el.className = "pill " + (synced ? "on" : "off");
+    el.textContent = (synced ? "Synced to your account" : "This device only") +
+      (note ? " \u2014 " + note : "");
+    el.title = synced
+      ? "Readings are saved to your account and appear on any device you open this page from."
+      : "Readings are saved in this browser only. Use Copy as CSV to keep a backup.";
+
+    var where = $("where");
+    if (where) {
+      where.innerHTML = synced
+        ? "Records are saved to your account, so they appear on any device you open this page from. " +
+          "Only you can read them."
+        : "Records are stored only in this browser, on this device &mdash; nothing is uploaded.";
+    }
   }
 
   /* ---------- helpers ---------- */
@@ -659,7 +776,7 @@
       type: $("f-type").value,
       note: $("f-note").value.trim()
     });
-    save();
+    persist([monthKey(ts)]);
     $("f-value").value = "";
     $("f-note").value = "";
     setNow();
@@ -671,8 +788,9 @@
     var btn = ev.target.closest("button.del");
     if (!btn) return;
     var id = btn.getAttribute("data-id");
+    var gone = readings.filter(function (r) { return r.id === id; })[0];
     readings = readings.filter(function (r) { return r.id !== id; });
-    save();
+    persist(gone ? [monthKey(gone.t)] : null);
     render();
   });
 
@@ -722,8 +840,9 @@
   $("clear-all").addEventListener("click", function () {
     if (!readings.length) return;
     if (!confirm("Delete all " + readings.length + " records? This cannot be undone.")) return;
+    var had = monthKeys(readings);   // capture before clearing, so their docs get deleted
     readings = [];
-    save();
+    persist(had);
     render();
   });
 
@@ -739,7 +858,9 @@
   setNow();
   syncChips();
   bindHover();
+  renderMode();
   render();
+  initSync();
   var rt = null;
   window.addEventListener("resize", function () {
     $("tip").style.opacity = "0";

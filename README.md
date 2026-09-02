@@ -12,13 +12,22 @@ no dependencies, no server.
 - Summary stats: average, estimated HbA1c, percent in range, count of lows under 70
 - Export the whole log as CSV
 
-## Privacy
+## Storage
 
-Records are stored in the browser's `localStorage` on the device that entered them.
-Nothing is uploaded and there is no backend — the deployed page is static HTML.
+The page has two backends and picks whichever is available:
 
-Because storage is per-browser, a phone and a laptop keep separate logs, and
-clearing site data erases the log. Use **Copy as CSV** to keep a backup.
+- **Synced** — when served as a published Claude Artifact it gets a per-account
+  document store, so the same log appears on every device. Readings are kept one
+  document per calendar month (the store caps an artifact at 5,000 documents, which
+  one-document-per-reading would reach in about three years).
+- **This device only** — anywhere else, including static hosting like GitHub Pages,
+  records live in the browser's `localStorage`. Nothing is uploaded and there is no
+  backend. A phone and a laptop then keep separate logs, and clearing site data
+  erases one.
+
+The status pill under the title always says which mode you are in, and the note at
+the foot of the page follows it. `localStorage` doubles as a local mirror in synced
+mode so the first paint is instant. Either way, **Copy as CSV** is the backup.
 
 ## Reference ranges
 
