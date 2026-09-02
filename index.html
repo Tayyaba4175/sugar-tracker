@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sugar Log</title>
+<meta name="description" content="A personal blood glucose log with a trend chart. Records stay in your own browser.">
+<meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sugar Log">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M7 22l5-5 4 3 8-9' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light;
+    --bg:            #f4f4f1;
+    --surface:       #fcfcfb;
+    --surface-2:     #f0efec;
+    --border:        #e2e1dc;
+    --text:          #0b0b0b;
+    --text-2:        #52514e;
+    --muted:         #7c7b76;
+    --series-1:      #2a78d6;
+    --band:          rgba(12, 163, 12, 0.09);
+    --good:          #0ca30c;
+    --warning:       #fab219;
+    --critical:      #d03b3b;
+    --shadow:        0 1px 2px rgba(0,0,0,.05), 0 1px 8px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg:          #121211;
+      --surface:     #1a1a19;
+      --surface-2:   #232322;
+      --border:      #383835;
+      --text:        #ffffff;
+      --text-2:      #c3c2b7;
+      --muted:       #8f8e86;
+      --series-1:    #3987e5;
+      --band:        rgba(12, 163, 12, 0.10);
+      --shadow:      none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:            #121211;
+    --surface:       #1a1a19;
+    --surface-2:     #232322;
+    --border:        #383835;
+    --text:          #ffffff;
+    --text-2:        #c3c2b7;
+    --muted:         #8f8e86;
+    --series-1:      #3987e5;
+    --band:          rgba(12, 163, 12, 0.10);
+    --shadow:        none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  header { margin-bottom: 22px; }
+  h1 { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+  .card > h2 {
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 14px;
+  }
+
+  /* ---- form ---- */
+  form.entry { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .field label { font-size: 12px; color: var(--text-2); font-weight: 500; }
+  input, select, button, textarea {
+    font: inherit; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; min-width: 0;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--series-1); outline-offset: 1px;
+  }
+  .field.note { grid-column: 1 / -1; }
+  button.primary {
+    background: var(--series-1); border-color: var(--series-1); color: #fff;
+    font-weight: 600; cursor: pointer; padding: 9px 18px;
+  }
+  button.primary:hover { filter: brightness(1.07); }
+  button.ghost { background: transparent; color: var(--text-2); cursor: pointer; font-size: 13px; padding: 6px 12px; }
+  button.ghost:hover { background: var(--surface-2); }
+  .err { color: var(--critical); font-size: 13px; margin-top: 10px; }
+
+  /* ---- stats ---- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+  .stat { background: var(--surface); padding: 14px 16px; }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .stat .v { font-size: 24px; font-weight: 650; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .stat .u { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+  /* ---- verdict ---- */
+  .verdict { display: flex; gap: 14px; align-items: flex-start; }
+  .verdict .icon { font-size: 20px; line-height: 1.2; flex: none; }
+  .verdict .headline { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+  .verdict .detail { color: var(--text-2); font-size: 13.5px; margin-top: 3px; }
+  .verdict.good .icon    { color: var(--good); }
+  .verdict.warning .icon { color: var(--warning); }
+  .verdict.critical .icon{ color: var(--critical); }
+  .verdict.flat .icon    { color: var(--muted); }
+
+  /* ---- chart ---- */
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .chips { display: flex; gap: 4px; background: var(--surface-2); padding: 3px; border-radius: 8px; }
+  .chip { border: 0; background: transparent; color: var(--text-2); font-size: 13px; padding: 5px 11px; border-radius: 6px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+  .filters select { padding: 6px 10px; font-size: 13px; }
+  .typefilter { display: flex; gap: 8px; align-items: center; }
+  .spacer { flex: 1; }
+
+  .chartbox { position: relative; }
+  svg.chart { display: block; width: 100%; height: auto; touch-action: none; }
+  .tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 12.5px; box-shadow: 0 2px 10px rgba(0,0,0,.14);
+    white-space: nowrap; z-index: 3;
+  }
+  .tip .tv { font-weight: 650; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .tip .tm { color: var(--muted); }
+  .legendline { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .legendline i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--series-1); vertical-align: middle; margin-right: 6px; }
+  .legendline i.dash { border-top-style: dashed; border-color: var(--text-2); }
+  .legendline i.band { height: 10px; border: 0; background: var(--band); border-radius: 2px; }
+
+  /* ---- table ---- */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; padding: 0 10px 8px 0; white-space: nowrap; }
+  td { padding: 9px 10px 9px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  td.when { white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  td.note { color: var(--text-2); font-size: 13px; }
+  .badge { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
+  .flag { font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .flag.hi { color: var(--critical); }
+  .flag.lo { color: var(--warning); }
+  .flag.ok { color: var(--muted); font-weight: 500; }
+  td.act { text-align: right; }
+  button.del { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
+  button.del:hover { color: var(--critical); background: var(--surface-2); }
+  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+  .foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .disclaimer { color: var(--muted); font-size: 12px; margin-top: 22px; line-height: 1.6; }
+  @media (max-width: 520px) {
+    .wrap { padding: 20px 14px 48px; }
+    .stat .v { font-size: 21px; }
+    /* 5 tiles in a 2-column grid would leave a hole - let the last one span */
+    .stats .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Sugar Log</h1>
+    <div class="sub">Blood glucose readings, with the trend over time.</div>
+  </header>
+
+  <section class="card">
+    <h2>Add a reading</h2>
+    <form class="entry" id="form" autocomplete="off">
+      <div class="field">
+        <label for="f-date">Date</label>
+        <input type="date" id="f-date" required>
+      </div>
+      <div class="field">
+        <label for="f-time">Time</label>
+        <input type="time" id="f-time" required>
+      </div>
+      <div class="field">
+        <label for="f-value">Glucose (mg/dL)</label>
+        <input type="number" id="f-value" min="20" max="800" step="1" placeholder="e.g. 128" required>
+      </div>
+      <div class="field">
+        <label for="f-type">Reading type</label>
+        <select id="f-type">
+          <option value="fasting">Fasting</option>
+          <option value="post">Post-meal</option>
+          <option value="random">Random</option>
+          <option value="bedtime">Bedtime</option>
+        </select>
+      </div>
+      <div class="field note">
+        <label for="f-note">Note (optional)</label>
+        <input type="text" id="f-note" maxlength="120" placeholder="e.g. after walk, felt dizzy">
+      </div>
+      <div><button type="submit" class="primary">Add reading</button></div>
+    </form>
+    <div class="err" id="err" hidden></div>
+  </section>
+
+  <div class="stats" id="stats"></div>
+
+  <section class="card" id="verdict-card" hidden>
+    <h2>Pattern</h2>
+    <div class="verdict" id="verdict"></div>
+  </section>
+
+  <section class="card">
+    <h2>Chart</h2>
+    <div class="filters">
+      <div class="chips" id="range-chips" role="group" aria-label="Time range">
+        <button class="chip" data-days="7">7 days</button>
+        <button class="chip" data-days="30">30 days</button>
+        <button class="chip" data-days="90">90 days</button>
+        <button class="chip" data-days="0">All</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="typefilter">
+        <label for="f-filter" class="sub">Type</label>
+        <select id="f-filter">
+          <option value="all">All types</option>
+          <option value="fasting">Fasting</option>
+          <option value="post">Post-meal</option>
+          <option value="random">Random</option>
+          <option value="bedtime">Bedtime</option>
+        </select>
+      </div>
+    </div>
+    <div class="chartbox" id="chartbox">
+      <svg class="chart" id="chart" role="img" aria-label="Glucose readings over time"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="legendline">
+      <span><i></i>Glucose reading</span>
+      <span><i class="dash"></i>Trend</span>
+      <span><i class="band"></i>Target range</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Records</h2>
+    <div class="tablewrap" id="tablewrap"></div>
+    <div class="foot">
+      <button class="ghost" id="copy-csv">Copy as CSV</button>
+      <button class="ghost" id="clear-all">Delete all records</button>
+    </div>
+  </section>
+
+  <p class="disclaimer">
+    Records are stored only in this browser, on this device &mdash; nothing is uploaded.
+    This is a personal log, not medical advice; discuss any pattern with a doctor.
+  </p>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var KEY = "sugar-log-v1";
+
+  // Reference ranges in mg/dL, by reading type.
+  var TYPES = {
+    fasting: { label: "Fasting",   low: 80, high: 130 },
+    post:    { label: "Post-meal", low: 80, high: 180 },
+    random:  { label: "Random",    low: 80, high: 160 },
+    bedtime: { label: "Bedtime",   low: 90, high: 150 }
+  };
+  var WIDE = { low: 80, high: 180 };   // band shown when types are mixed
+
+  var MIN_POINTS = 4;      // fewest readings before calling a trend
+  var MIN_SPAN_DAYS = 3;   // shortest span a per-week rate may be inferred from
+
+  var readings = load();
+  var rangeDays = 30;
+  var typeFilter = "all";
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ---------- storage ---------- */
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return [];
+      var list = JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      return list.filter(function (r) {
+        return r && typeof r.t === "number" && typeof r.v === "number" && TYPES[r.type];
+      });
+    } catch (e) { return []; }
+  }
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(readings)); } catch (e) {}
+  }
+
+  /* ---------- helpers ---------- */
+
+  function sorted() {
+    return readings.slice().sort(function (a, b) { return a.t - b.t; });
+  }
+
+  function inWindow(list) {
+    if (!rangeDays) return list;
+    var cut = Date.now() - rangeDays * 864e5;
+    return list.filter(function (r) { return r.t >= cut; });
+  }
+
+  function byType(list) {
+    if (typeFilter === "all") return list;
+    return list.filter(function (r) { return r.type === typeFilter; });
+  }
+
+  function visible() { return byType(inWindow(sorted())); }
+
+  function band() { return typeFilter === "all" ? WIDE : TYPES[typeFilter]; }
+
+  function status(r) {
+    var t = TYPES[r.type];
+    if (r.v < 70) return "lo";
+    if (r.v < t.low) return "lo";
+    if (r.v > t.high) return "hi";
+    return "ok";
+  }
+
+  function fmtDate(ts) {
+    return new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  }
+  function fmtDateTime(ts) {
+    var d = new Date(ts);
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" }) +
+      ", " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+  function mean(nums) {
+    if (!nums.length) return null;
+    var s = 0, i;
+    for (i = 0; i < nums.length; i++) s += nums[i];
+    return s / nums.length;
+  }
+
+  // Least-squares slope in mg/dL per day.
+  function slopePerDay(list) {
+    var n = list.length;
+    if (n < 2) return null;
+    var x = [], y = [], i;
+    for (i = 0; i < n; i++) { x.push(list[i].t / 864e5); y.push(list[i].v); }
+    var mx = mean(x), my = mean(y), num = 0, den = 0;
+    for (i = 0; i < n; i++) { num += (x[i] - mx) * (y[i] - my); den += (x[i] - mx) * (x[i] - mx); }
+    if (den === 0) return null;
+    return { m: num / den, b: my - (num / den) * mx };
+  }
+
+  /* ---------- stats ---------- */
+
+  function renderStats() {
+    var list = visible();
+    var vals = list.map(function (r) { return r.v; });
+    var avg = mean(vals);
+    var inRange = list.filter(function (r) { return status(r) === "ok"; }).length;
+    var lows = list.filter(function (r) { return r.v < 70; }).length;
+
+    function stat(k, v, u) {
+      return '<div class="stat"><div class="k">' + k + '</div><div class="v">' + v +
+        (u ? ' <span class="u">' + u + '</span>' : '') + '</div></div>';
+    }
+
+    var html = "";
+    html += stat("Readings", list.length, rangeDays ? "in " + rangeDays + "d" : "total");
+    html += stat("Average", avg === null ? "&mdash;" : Math.round(avg), "mg/dL");
+    html += stat("Est. HbA1c", avg === null ? "&mdash;" : ((avg + 46.7) / 28.7).toFixed(1), "%");
+    html += stat("In range", list.length ? Math.round(inRange / list.length * 100) : "&mdash;",
+      list.length ? "%" : "");
+    html += stat("Lows &lt;70", lows, lows ? "readings" : "");
+    $("stats").innerHTML = html;
+  }
+
+  /* ---------- verdict ---------- */
+
+  function renderVerdict() {
+    var list = visible();
+    var card = $("verdict-card"), el = $("verdict");
+
+    var span = list.length ? (list[list.length - 1].t - list[0].t) / 864e5 : 0;
+
+    // A rate per week is meaningless until the readings actually cover some days -
+    // fitting a line across a few minutes extrapolates to absurd numbers.
+    if (list.length < MIN_POINTS || span < MIN_SPAN_DAYS) {
+      var why = list.length < MIN_POINTS
+        ? "Add at least " + MIN_POINTS + " readings in this range to see whether the pattern is rising or falling."
+        : "These readings only cover " + (span < 1 ? "less than a day" : Math.round(span) + " days") +
+          ". A trend needs at least " + MIN_SPAN_DAYS + " days of history to mean anything.";
+      card.hidden = false;
+      el.className = "verdict flat";
+      el.innerHTML = '<div class="icon" aria-hidden="true">&#9711;</div><div>' +
+        '<div class="headline">Not enough history yet</div>' +
+        '<div class="detail">' + why + '</div></div>';
+      return;
+    }
+
+    var fit = slopePerDay(list);
+    var perWeek = fit ? fit.m * 7 : 0;
+    var scope = typeFilter === "all" ? "all readings" : TYPES[typeFilter].label.toLowerCase() + " readings";
+    var over = "across " + scope + " over the last " + Math.max(1, Math.round(span)) + " days";
+
+    var dir, icon, tone;
+    if (perWeek >= 3) {
+      dir = "Rising"; icon = "&#9650;";
+      tone = perWeek >= 8 ? "critical" : "warning";
+    } else if (perWeek <= -3) {
+      dir = "Falling"; icon = "&#9660;"; tone = "good";
+    } else {
+      dir = "Stable"; icon = "&#9679;"; tone = "good";
+    }
+
+    var rate = (perWeek >= 0 ? "+" : "−") + Math.abs(perWeek).toFixed(1) + " mg/dL per week";
+    var detail = dir === "Stable"
+      ? "Holding steady (" + rate + ") " + over + "."
+      : rate + " " + over + ".";
+
+    // Recent half vs earlier half, as a plain-language cross-check.
+    var mid = Math.floor(list.length / 2);
+    var a = mean(list.slice(0, mid).map(function (r) { return r.v; }));
+    var b = mean(list.slice(mid).map(function (r) { return r.v; }));
+    if (a !== null && b !== null) {
+      detail += " Recent half averages " + Math.round(b) + " mg/dL vs " + Math.round(a) +
+        " earlier (" + (b >= a ? "+" : "−") + Math.abs(Math.round(b - a)) + ").";
+    }
+
+    card.hidden = false;
+    el.className = "verdict " + tone;
+    el.innerHTML = '<div class="icon" aria-hidden="true">' + icon + '</div>' +
+      '<div><div class="headline">' + dir + '</div><div class="detail">' + detail + '</div></div>';
+  }
+
+  /* ---------- chart ---------- */
+
+  var pts = [];       // {x, y, r} in viewBox units, for hover
+  var chartW = 760;   // viewBox width, matched to CSS pixels so text stays legible
+
+  function renderChart() {
+    var svg = $("chart");
+    var box = $("chartbox");
+    // Match the viewBox to the real pixel width, so 11px axis text renders as 11px.
+    var W = Math.max(280, Math.round(box.clientWidth) || 760);
+    var narrow = W < 460;
+    var H = narrow ? 240 : 320;
+    var L = 40, R = 12, T = 14, B = 30;
+    chartW = W;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var list = visible();
+    pts = [];
+
+    if (!list.length) {
+      svg.innerHTML = '<text x="' + (W / 2) + '" y="' + (H / 2) + '" text-anchor="middle" ' +
+        'fill="var(--muted)" font-size="14">No readings in this range yet</text>';
+      return;
+    }
+
+    var bd = band();
+    var vals = list.map(function (r) { return r.v; });
+    var lo = Math.min.apply(null, vals.concat([bd.low]));
+    var hi = Math.max.apply(null, vals.concat([bd.high]));
+    var pad = Math.max(12, (hi - lo) * 0.12);
+    var y0 = Math.max(0, Math.floor((lo - pad) / 10) * 10);
+    var y1 = Math.ceil((hi + pad) / 10) * 10;
+
+    var t0 = list[0].t, t1 = list[list.length - 1].t;
+    if (t1 === t0) { t0 -= 432e5; t1 += 432e5; }
+
+    var X = function (t) { return L + (t - t0) / (t1 - t0) * (W - L - R); };
+    var Y = function (v) { return T + (y1 - v) / (y1 - y0) * (H - T - B); };
+
+    var s = [];
+
+    // target band
+    s.push('<rect x="' + L + '" y="' + Y(bd.high).toFixed(1) + '" width="' + (W - L - R) +
+      '" height="' + (Y(bd.low) - Y(bd.high)).toFixed(1) + '" fill="var(--band)"/>');
+
+    // y grid + labels
+    var steps = narrow ? 4 : 5, i, gv, gy;
+    for (i = 0; i <= steps; i++) {
+      gv = y0 + (y1 - y0) * i / steps;
+      gy = Y(gv);
+      s.push('<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) +
+        '" stroke="var(--border)" stroke-width="1"/>');
+      s.push('<text x="' + (L - 9) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" ' +
+        'fill="var(--muted)" font-size="11">' + Math.round(gv) + '</text>');
+    }
+
+    // x labels
+    var xticks = Math.min(narrow ? 3 : 5, Math.max(2, list.length));
+    for (i = 0; i < xticks; i++) {
+      var tt = t0 + (t1 - t0) * i / (xticks - 1);
+      s.push('<text x="' + X(tt).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="' +
+        (i === 0 ? "start" : i === xticks - 1 ? "end" : "middle") +
+        '" fill="var(--muted)" font-size="11">' + fmtDate(tt) + '</text>');
+    }
+
+    // trend line
+    var trendable = list.length >= MIN_POINTS &&
+      (list[list.length - 1].t - list[0].t) / 864e5 >= MIN_SPAN_DAYS;
+    var fit = trendable ? slopePerDay(list) : null;
+    if (fit) {
+      var ta = fit.m * (t0 / 864e5) + fit.b, tb = fit.m * (t1 / 864e5) + fit.b;
+      ta = Math.min(y1, Math.max(y0, ta)); tb = Math.min(y1, Math.max(y0, tb));
+      s.push('<line x1="' + X(t0).toFixed(1) + '" y1="' + Y(ta).toFixed(1) + '" x2="' + X(t1).toFixed(1) +
+        '" y2="' + Y(tb).toFixed(1) + '" stroke="var(--text-2)" stroke-width="2" ' +
+        'stroke-dasharray="6 5" stroke-linecap="round" opacity=".55"/>');
+    }
+
+    // series line
+    var d = list.map(function (r, k) {
+      return (k ? "L" : "M") + X(r.t).toFixed(1) + " " + Y(r.v).toFixed(1);
+    }).join(" ");
+    s.push('<path d="' + d + '" fill="none" stroke="var(--series-1)" stroke-width="2" ' +
+      'stroke-linejoin="round" stroke-linecap="round"/>');
+
+    // markers (2px surface ring so overlaps stay readable)
+    list.forEach(function (r) {
+      var cx = X(r.t), cy = Y(r.v);
+      pts.push({ x: cx, y: cy, r: r });
+      s.push('<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="4" ' +
+        'fill="var(--series-1)" stroke="var(--surface)" stroke-width="2"/>');
+    });
+
+    s.push('<line id="cross" x1="0" y1="' + T + '" x2="0" y2="' + (H - B) +
+      '" stroke="var(--text-2)" stroke-width="1" opacity="0"/>');
+
+    svg.innerHTML = s.join("");
+  }
+
+  /* ---------- hover layer ---------- */
+
+  function bindHover() {
+    var svg = $("chart"), box = $("chartbox"), tip = $("tip");
+
+    function move(ev) {
+      if (!pts.length) return;
+      var rect = svg.getBoundingClientRect();
+      var scale = chartW / rect.width;
+      var mx = (ev.clientX - rect.left) * scale;
+      var best = null, bd = Infinity, i, dx;
+      for (i = 0; i < pts.length; i++) {
+        dx = Math.abs(pts[i].x - mx);
+        if (dx < bd) { bd = dx; best = pts[i]; }
+      }
+      if (!best) return;
+      var cross = svg.querySelector("#cross");
+      if (cross) { cross.setAttribute("x1", best.x); cross.setAttribute("x2", best.x); cross.setAttribute("opacity", ".3"); }
+
+      var t = TYPES[best.r.type];
+      var st = status(best.r);
+      tip.innerHTML = '<div class="tv">' + best.r.v + ' <span class="tm">mg/dL</span></div>' +
+        '<div class="tm">' + t.label + ' &middot; ' + fmtDateTime(best.r.t) + '</div>' +
+        (st !== "ok" ? '<div class="tm">' + (st === "hi" ? "above" : "below") + " target " +
+          t.low + "&ndash;" + t.high + '</div>' : '');
+      tip.style.opacity = "1";
+      var px = best.x / scale, py = best.y / scale;
+      var tw = tip.offsetWidth;
+      tip.style.left = Math.max(0, Math.min(rect.width - tw, px - tw / 2)) + "px";
+      tip.style.top = Math.max(0, py - tip.offsetHeight - 12) + "px";
+    }
+
+    function leave() {
+      tip.style.opacity = "0";
+      var cross = svg.querySelector("#cross");
+      if (cross) cross.setAttribute("opacity", "0");
+    }
+
+    svg.addEventListener("mousemove", move);
+    svg.addEventListener("pointerdown", move);
+    svg.addEventListener("mouseleave", leave);
+    box.addEventListener("pointerleave", leave);
+  }
+
+  /* ---------- table ---------- */
+
+  function renderTable() {
+    var list = sorted().reverse();
+    var wrap = $("tablewrap");
+
+    if (!list.length) {
+      wrap.innerHTML = '<div class="empty">No records yet. Add your first reading above.</div>';
+      return;
+    }
+
+    var rows = list.map(function (r) {
+      var t = TYPES[r.type], st = status(r);
+      var flag = st === "hi" ? '<span class="flag hi">High</span>'
+        : st === "lo" ? '<span class="flag lo">Low</span>'
+        : '<span class="flag ok">In range</span>';
+      return '<tr>' +
+        '<td class="when">' + fmtDateTime(r.t) + '</td>' +
+        '<td class="num">' + r.v + '</td>' +
+        '<td><span class="badge">' + t.label + '</span></td>' +
+        '<td>' + flag + '</td>' +
+        '<td class="note">' + esc(r.note || "") + '</td>' +
+        '<td class="act"><button class="del" data-id="' + r.id + '" ' +
+          'aria-label="Delete reading" title="Delete">&times;</button></td>' +
+        '</tr>';
+    }).join("");
+
+    wrap.innerHTML = '<table><thead><tr><th>When</th><th>mg/dL</th><th>Type</th>' +
+      '<th>Status</th><th>Note</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function esc(str) {
+    return String(str).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  /* ---------- render all ---------- */
+
+  function render() {
+    renderStats();
+    renderVerdict();
+    renderChart();
+    renderTable();
+  }
+
+  /* ---------- events ---------- */
+
+  $("form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var err = $("err");
+    var date = $("f-date").value, time = $("f-time").value;
+    var v = parseFloat($("f-value").value);
+
+    if (!date || !time) { err.textContent = "Pick a date and time."; err.hidden = false; return; }
+    if (!(v >= 20 && v <= 800)) { err.textContent = "Enter a glucose value between 20 and 800 mg/dL."; err.hidden = false; return; }
+
+    var ts = new Date(date + "T" + time).getTime();
+    if (isNaN(ts)) { err.textContent = "That date and time could not be read."; err.hidden = false; return; }
+
+    err.hidden = true;
+    readings.push({
+      id: "r" + ts + "_" + Math.floor(Math.random() * 1e6),
+      t: ts,
+      v: Math.round(v * 10) / 10,
+      type: $("f-type").value,
+      note: $("f-note").value.trim()
+    });
+    save();
+    $("f-value").value = "";
+    $("f-note").value = "";
+    setNow();
+    render();
+    $("f-value").focus();
+  });
+
+  $("tablewrap").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("button.del");
+    if (!btn) return;
+    var id = btn.getAttribute("data-id");
+    readings = readings.filter(function (r) { return r.id !== id; });
+    save();
+    render();
+  });
+
+  $("range-chips").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("button.chip");
+    if (!btn) return;
+    rangeDays = parseInt(btn.getAttribute("data-days"), 10);
+    syncChips();
+    render();
+  });
+
+  function syncChips() {
+    [].forEach.call($("range-chips").children, function (b) {
+      b.setAttribute("aria-pressed", String(parseInt(b.getAttribute("data-days"), 10) === rangeDays));
+    });
+  }
+
+  $("f-filter").addEventListener("change", function (ev) {
+    typeFilter = ev.target.value;
+    render();
+  });
+
+  $("copy-csv").addEventListener("click", function () {
+    var btn = this;
+    var rows = [["date_time", "glucose_mg_dl", "type", "status", "note"]];
+    sorted().forEach(function (r) {
+      rows.push([new Date(r.t).toISOString(), r.v, TYPES[r.type].label, status(r), r.note || ""]);
+    });
+    var csv = rows.map(function (row) {
+      return row.map(function (c) {
+        c = String(c);
+        return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+      }).join(",");
+    }).join("\n");
+
+    var done = function (ok) {
+      btn.textContent = ok ? "Copied ✓" : "Copy failed";
+      setTimeout(function () { btn.textContent = "Copy as CSV"; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(csv).then(function () { done(true); }, function () { done(false); });
+    } else {
+      done(false);
+    }
+  });
+
+  $("clear-all").addEventListener("click", function () {
+    if (!readings.length) return;
+    if (!confirm("Delete all " + readings.length + " records? This cannot be undone.")) return;
+    readings = [];
+    save();
+    render();
+  });
+
+  /* ---------- init ---------- */
+
+  function setNow() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    $("f-date").value = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+    $("f-time").value = p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  setNow();
+  syncChips();
+  bindHover();
+  render();
+  var rt = null;
+  window.addEventListener("resize", function () {
+    $("tip").style.opacity = "0";
+    clearTimeout(rt);
+    rt = setTimeout(renderChart, 120);
+  });
+})();
+</script>
+</body>
+</html>
