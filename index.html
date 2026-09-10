@@ -293,6 +293,12 @@
   // See sync-worker/README.md for setup. Leave blank to skip this.
   var GITHUB_SYNC_URL = ""; // <-- paste your deployed Worker URL here
 
+  // Optional fourth backend: POST the full reading list to a Google Apps
+  // Script Web App, which writes it straight into a Google Sheet. See
+  // google-sheets-sync/README.md for setup. Leave blank to skip this.
+  var GOOGLE_SHEET_SYNC_URL = ""; // <-- paste your Apps Script Web App URL here
+  var GOOGLE_SHEET_SECRET = "Rk6sotsrNTgPPuVwiuLDyDj0KPi59-Ov"; // must match Code.gs
+
   // Reference ranges in mg/dL, by reading type.
   var TYPES = {
     fasting: { label: "Fasting",   low: 80, high: 130 },
@@ -360,6 +366,28 @@
     }, 1200);
   }
 
+  var googleSheetSyncTimer = null;
+
+  // Debounced push to the Google Sheet via Apps Script. Uses mode:"no-cors"
+  // because Apps Script Web Apps do not send CORS headers on their
+  // response — the write still happens server-side, we just cannot read
+  // back a success/failure status from the browser. text/plain avoids a
+  // CORS preflight request, which Apps Script does not handle either.
+  function syncToGoogleSheet() {
+    if (!GOOGLE_SHEET_SYNC_URL) return;
+    clearTimeout(googleSheetSyncTimer);
+    googleSheetSyncTimer = setTimeout(function () {
+      fetch(GOOGLE_SHEET_SYNC_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ secret: GOOGLE_SHEET_SECRET, readings: readings })
+      }).catch(function (e) {
+        console.warn("Google Sheet sync failed to send (data is still saved locally):", e);
+      });
+    }, 1200);
+  }
+
   function monthKey(ts) {
     var d = new Date(ts);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
@@ -384,6 +412,7 @@
   function persist(touched) {
     saveLocal();
     syncToGithub();
+    syncToGoogleSheet();
     if (mode !== "synced" || !coll) return;
     var m = byMonth(readings);
     (touched || Object.keys(m)).forEach(function (k) {
