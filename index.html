@@ -10,6 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Sugar Log">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M7 22l5-5 4 3 8-9' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -293,11 +294,28 @@
   // See sync-worker/README.md for setup. Leave blank to skip this.
   var GITHUB_SYNC_URL = ""; // <-- paste your deployed Worker URL here
 
-  // Optional fourth backend: POST the full reading list to a Google Apps
-  // Script Web App, which writes it straight into a Google Sheet. See
-  // google-sheets-sync/README.md for setup. Leave blank to skip this.
+  // Optional fourth backend: sync the full reading list with a Google Apps
+  // Script Web App backed by a Google Sheet. On load the page GETs the
+  // current rows from the Sheet and uses them as the source of truth; every
+  // add/edit/delete POSTs the full list back so the Sheet stays in sync.
+  // This is what makes the log the same on every device, without needing a
+  // Claude account or GitHub sync. See google-sheets-sync/README.md for
+  // setup. Leave blank to skip this.
   var GOOGLE_SHEET_SYNC_URL = ""; // <-- paste your Apps Script Web App URL here
   var GOOGLE_SHEET_SECRET = "Rk6sotsrNTgPPuVwiuLDyDj0KPi59-Ov"; // must match Code.gs
+
+  // Optional fifth backend: sync the full reading list with a free Supabase
+  // project (open-source Postgres + REST API, no server of your own to
+  // run). On load the page reads the current rows from the `readings`
+  // table and uses them as the source of truth; every add/edit/delete
+  // rewrites that table to match — same idea as the Google Sheet backend
+  // above, just backed by a real database instead of a spreadsheet. See
+  // supabase-sync/README.md for setup. Leave blank to skip this.
+  var SUPABASE_URL = ""; // <-- paste your Supabase Project URL here
+  var SUPABASE_ANON_KEY = ""; // <-- paste your Supabase anon public key here
+  var supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
   // Reference ranges in mg/dL, by reading type.
   var TYPES = {
@@ -324,9 +342,9 @@
   // runs as a published artifact it also gets a per-account document store,
   // which then becomes the source of truth and syncs the log across devices.
 
-  var mode = "local";     // "local" | "synced"
+  var mode = "local";     // "local" | "synced-db" | "synced-sheet" | "synced-supabase"
   var note = "";          // extra detail for the status pill
-  var coll = null;        // the readings collection, once synced
+  var coll = null;        // the readings collection, once synced (artifact db backend)
 
   function valid(r) {
     return r && typeof r.t === "number" && typeof r.v === "number" && TYPES[r.type];
@@ -388,6 +406,92 @@
     }, 1200);
   }
 
+  // Unlike the write side, a GET to an Apps Script Web App is a "simple"
+  // cross-origin request (no custom headers), so its JSON response can
+  // actually be read back with a plain fetch — no no-cors workaround needed.
+  // This is what lets the page load the shared log on any device.
+  function loadFromGoogleSheet() {
+    if (!GOOGLE_SHEET_SYNC_URL) return;
+    var url = GOOGLE_SHEET_SYNC_URL +
+      (GOOGLE_SHEET_SYNC_URL.indexOf("?") === -1 ? "?" : "&") +
+      "secret=" + encodeURIComponent(GOOGLE_SHEET_SECRET);
+    fetch(url).then(function (resp) {
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return resp.json();
+    }).then(function (data) {
+      if (!data || data.ok !== true || !Array.isArray(data.readings)) {
+        throw new Error((data && data.error) || "bad response");
+      }
+      if (data.readings.length === 0 && readings.length) {
+        // Sheet is empty but this device already has a local log: seed the
+        // sheet from it instead of wiping what's on screen.
+        syncToGoogleSheet();
+      } else {
+        readings = data.readings.filter(valid);
+        saveLocal();
+      }
+      mode = "synced-sheet";
+      note = "";
+      renderMode();
+      render();
+    }).catch(function (e) {
+      console.warn("Could not load from Google Sheet (showing last copy saved on this device):", e);
+      note = "could not reach Google Sheet — showing last saved copy";
+      renderMode();
+    });
+  }
+
+  var supabaseSyncTimer = null;
+
+  // Debounced full rewrite of the `readings` table, mirroring the Google
+  // Sheet backend: delete everything, then reinsert the current in-memory
+  // list. Simpler and more robust than diffing inserts/updates/deletes,
+  // and at personal-log volumes the extra writes cost nothing.
+  function syncToSupabase() {
+    if (!supabase) return;
+    clearTimeout(supabaseSyncTimer);
+    supabaseSyncTimer = setTimeout(function () {
+      supabase.from("readings").delete().neq("id", "").then(function (res) {
+        if (res.error) throw res.error;
+        if (!readings.length) return null;
+        var rows = readings.map(function (r) {
+          return { id: r.id, t: r.t, v: r.v, type: r.type, note: r.note || "" };
+        });
+        return supabase.from("readings").insert(rows);
+      }).then(function (res) {
+        if (res && res.error) throw res.error;
+      }).catch(function (e) {
+        console.warn("Supabase sync failed (data is still saved locally):", e);
+      });
+    }, 1200);
+  }
+
+  function loadFromSupabase() {
+    if (!supabase) return;
+    supabase.from("readings").select("*").then(function (res) {
+      if (res.error) throw res.error;
+      var rows = (res.data || []).map(function (r) {
+        return { id: r.id, t: Number(r.t), v: Number(r.v), type: r.type, note: r.note || "" };
+      }).filter(valid);
+      if (rows.length === 0 && readings.length) {
+        // Table is empty but this device already has a local log: seed the
+        // table from it instead of wiping what's on screen.
+        syncToSupabase();
+      } else {
+        readings = rows;
+        saveLocal();
+      }
+      mode = "synced-supabase";
+      note = "";
+      renderMode();
+      render();
+    }).catch(function (e) {
+      console.warn("Could not load from Supabase (showing last copy saved on this device):", e);
+      note = "could not reach Supabase — showing last saved copy";
+      renderMode();
+    });
+  }
+
   function monthKey(ts) {
     var d = new Date(ts);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
@@ -413,7 +517,8 @@
     saveLocal();
     syncToGithub();
     syncToGoogleSheet();
-    if (mode !== "synced" || !coll) return;
+    syncToSupabase();
+    if (mode !== "synced-db" || !coll) return;
     var m = byMonth(readings);
     (touched || Object.keys(m)).forEach(function (k) {
       var items = m[k];
@@ -448,7 +553,7 @@
           }));
         }
       }).then(function () {
-        mode = "synced";
+        mode = "synced-db";
         note = "";
         renderMode();
         coll.onSnapshot(function (snap) {
@@ -468,17 +573,28 @@
   function renderMode() {
     var el = $("mode");
     if (!el) return;
-    var synced = mode === "synced";
+    var synced = mode !== "local";
+    var label = mode === "synced-supabase" ? "Synced to Supabase"
+      : mode === "synced-sheet" ? "Synced to Google Sheet"
+      : mode === "synced-db" ? "Synced to your account"
+      : "This device only";
     el.className = "pill " + (synced ? "on" : "off");
-    el.textContent = (synced ? "Synced to your account" : "This device only") +
-      (note ? " \u2014 " + note : "");
-    el.title = synced
+    el.textContent = label + (note ? " \u2014 " + note : "");
+    el.title = mode === "synced-supabase"
+      ? "Readings are saved to your Supabase project and loaded from it, so every device that opens this page sees the same log."
+      : mode === "synced-sheet"
+      ? "Readings are saved to your Google Sheet and loaded from it, so every device that opens this page sees the same log."
+      : mode === "synced-db"
       ? "Readings are saved to your account and appear on any device you open this page from."
       : "Readings are saved in this browser only. Use Copy as CSV to keep a backup.";
 
     var where = $("where");
     if (where) {
-      where.innerHTML = synced
+      where.innerHTML = mode === "synced-supabase"
+        ? "Records are saved to your Supabase project, so they appear on any device that opens this page."
+        : mode === "synced-sheet"
+        ? "Records are saved to your Google Sheet, so they appear on any device that opens this page."
+        : mode === "synced-db"
         ? "Records are saved to your account, so they appear on any device you open this page from. " +
           "Only you can read them."
         : "Records are stored only in this browser, on this device &mdash; nothing is uploaded.";
@@ -917,6 +1033,8 @@
   renderMode();
   render();
   initSync();
+  loadFromGoogleSheet();
+  loadFromSupabase();
   var rt = null;
   window.addEventListener("resize", function () {
     $("tip").style.opacity = "0";

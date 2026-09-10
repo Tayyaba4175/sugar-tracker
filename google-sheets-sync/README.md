@@ -1,9 +1,11 @@
 # Google Sheet sync
 
-Lets the Sugar Tracker page save every reading straight into your
-"sugar record" Google Sheet, in addition to (or instead of) the
-GitHub sync in `sync-worker/`. No Cloudflare account needed — this
-uses only your Google account.
+Makes your "sugar record" Google Sheet the shared home for every reading:
+add, edit, or delete an entry on any device and it's saved straight to the
+Sheet, and every device that opens the page loads its list from that same
+Sheet — so your phone and your laptop always show the same log. No
+Cloudflare account needed and no GitHub sync required — this uses only
+your Google account.
 
 ## Deploy (5 minutes, all inside Google Sheets)
 
@@ -32,14 +34,18 @@ uses only your Google account.
     and set it to the URL from step 9. Commit and push `index.html`.
 
 That's it — every time you add, edit, or delete a reading in the app, it
-POSTs the full reading list to this script, which rewrites Sheet1 to match.
+POSTs the full reading list to this script, which rewrites Sheet1 to
+match. And every time the page loads (any device, any browser), it GETs
+the current rows from this script and shows those — so the Sheet is the
+one shared copy everyone reads from.
 
 ## Updating the script later
 
-If you ever change `Code.gs`, paste the updated code into the same Apps
-Script project, save, then **Deploy > Manage deployments > (pencil/edit
-icon) > Deploy** to push the new version to the same URL (so you don't
-have to update `index.html` again).
+If you ever change `Code.gs` (including updating to this version from an
+older one that only supported writes), paste the updated code into the
+same Apps Script project, save, then **Deploy > Manage deployments >
+(pencil/edit icon) > Deploy** to push the new version to the same URL (so
+you don't have to update `index.html` again).
 
 ## Note on the secret
 
