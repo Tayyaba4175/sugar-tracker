@@ -288,6 +288,11 @@
 
   var KEY = "sugar-log-v1";
 
+  // Optional third backend: POST the full reading list to a small
+  // Cloudflare Worker, which commits it to data/readings.json on GitHub.
+  // See sync-worker/README.md for setup. Leave blank to skip this.
+  var GITHUB_SYNC_URL = ""; // <-- paste your deployed Worker URL here
+
   // Reference ranges in mg/dL, by reading type.
   var TYPES = {
     fasting: { label: "Fasting",   low: 80, high: 130 },
@@ -334,6 +339,27 @@
     try { localStorage.setItem(KEY, JSON.stringify(readings)); } catch (e) {}
   }
 
+  var githubSyncTimer = null;
+
+  // Debounced push to GitHub via the sync Worker, so a burst of edits
+  // becomes one commit instead of one per keystroke. Failures are logged
+  // only — the reading is already safe in localStorage regardless.
+  function syncToGithub() {
+    if (!GITHUB_SYNC_URL) return;
+    clearTimeout(githubSyncTimer);
+    githubSyncTimer = setTimeout(function () {
+      fetch(GITHUB_SYNC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(readings)
+      }).then(function (resp) {
+        if (!resp.ok) throw new Error("sync failed: " + resp.status);
+      }).catch(function (e) {
+        console.warn("GitHub sync failed (data is still saved locally):", e);
+      });
+    }, 1200);
+  }
+
   function monthKey(ts) {
     var d = new Date(ts);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
@@ -357,6 +383,7 @@
   // has readings has its document deleted rather than left as an empty husk.
   function persist(touched) {
     saveLocal();
+    syncToGithub();
     if (mode !== "synced" || !coll) return;
     var m = byMonth(readings);
     (touched || Object.keys(m)).forEach(function (k) {

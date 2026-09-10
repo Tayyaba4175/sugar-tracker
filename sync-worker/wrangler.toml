@@ -1,0 +1,13 @@
+name = "sugar-tracker-sync"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# The GitHub token is NOT set here. Set it as a secret instead, so it never
+# gets committed to git or exposed anywhere public:
+#
+#   wrangler secret put GITHUB_TOKEN
+#
+# Paste a GitHub fine-grained Personal Access Token scoped to ONLY this repo
+# (Tayyaba4175/sugar-tracker), with "Contents: Read and write" permission
+# and nothing else. Create one at:
+# https://github.com/settings/personal-access-tokens/new
