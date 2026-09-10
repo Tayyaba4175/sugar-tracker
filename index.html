@@ -311,8 +311,8 @@
   // rewrites that table to match — same idea as the Google Sheet backend
   // above, just backed by a real database instead of a spreadsheet. See
   // supabase-sync/README.md for setup. Leave blank to skip this.
-  var SUPABASE_URL = ""; // <-- paste your Supabase Project URL here
-  var SUPABASE_ANON_KEY = ""; // <-- paste your Supabase anon public key here
+  var SUPABASE_URL = "https://bngijcffdryjjhqgelqh.supabase.co"; // <-- paste your Supabase Project URL here
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJuZ2lqY2ZmZHJ5ampocWdlbHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwMzMyMzcsImV4cCI6MjEwNDYwOTIzN30._0ykGyeMu61atVSGbkizWlBvPmPHGbnR9oSBVPQ5thU"; // <-- paste your Supabase anon public key here
   var supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
